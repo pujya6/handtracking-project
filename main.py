@@ -2,15 +2,24 @@ import cv2
 import time
 import math
 import mediapipe as mp
+from pythonosc.udp_client import SimpleUDPClient
 
-#mediaPipe setup
+
+# OSC client
+OSC_IP = "127.0.0.1"
+OSC_PORT = 7000
+
+osc_client = SimpleUDPClient(OSC_IP, OSC_PORT)
+
+
+# MediaPipe setup
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 
 cap = cv2.VideoCapture(0)
-
 cap.set(3, 1280)
 cap.set(4, 720)
+
 
 # Calculate distance between two landmarks
 def distance(p1, p2):
@@ -19,42 +28,42 @@ def distance(p1, p2):
         p1.y - p2.y
     )
 
-#count fingers
+
+# Count fingers
 def count_fingers(lm, hand_label):
 
     fingers = []
 
-    #index finger
+    # Index finger
     if lm[8].y < lm[6].y:
         fingers.append(1)
     else:
         fingers.append(0)
 
-    #middle finger
+    # Middle finger
     if lm[12].y < lm[10].y:
         fingers.append(1)
     else:
         fingers.append(0)
 
-    #ring finger
+    # Ring finger
     if lm[16].y < lm[14].y:
         fingers.append(1)
     else:
         fingers.append(0)
 
-    #pinky finger
+    # Pinky finger
     if lm[20].y < lm[18].y:
         fingers.append(1)
     else:
         fingers.append(0)
 
-    #thumb
+    # Thumb
     if hand_label == "Right":
         if lm[4].x < lm[3].x:
             fingers.append(1)
         else:
             fingers.append(0)
-
     else:
         if lm[4].x > lm[3].x:
             fingers.append(1)
@@ -63,7 +72,8 @@ def count_fingers(lm, hand_label):
 
     return sum(fingers)
 
-#main function
+
+# Main function
 def main():
 
     previous_time = 0
@@ -76,7 +86,7 @@ def main():
 
         while True:
 
-            #read webcam
+            # Read webcam
             success, img = cap.read()
 
             attempt = 0
@@ -90,46 +100,58 @@ def main():
                 print("Failed to read frame")
                 break
 
-            #mirror webcam
+
+            # Mirror webcam
             img = cv2.flip(img, 1)
 
-            #convert BGR to RGB
+
+            # Convert BGR to RGB
             rgb = cv2.cvtColor(
                 img,
                 cv2.COLOR_BGR2RGB
             )
 
-            #process image
+
+            # Process image
             results = hands.process(rgb)
 
-            #process detected hands
+
+            # Process detected hands
             if results.multi_hand_landmarks:
+
+                # --------------------------------
+                # DRAW AND DISPLAY ALL DETECTED HANDS
+                # --------------------------------
 
                 for hand_landmarks, handedness in zip(
                     results.multi_hand_landmarks,
                     results.multi_handedness
                 ):
 
-                    #draw landmarks
+                    # Draw landmarks
                     mp_drawing.draw_landmarks(
                         img,
                         hand_landmarks,
                         mp_hands.HAND_CONNECTIONS
                     )
 
-                    #get landmarks
+
+                    # Get landmarks
                     lm = hand_landmarks.landmark
+
 
                     # Identify hand
                     hand_label = handedness.classification[0].label
 
-                    #count fingers
+
+                    # Count fingers
                     finger_count = count_fingers(
                         lm,
                         hand_label
                     )
 
-                    #determine gesture
+
+                    # Determine gesture
                     if finger_count == 0:
                         gesture = "Fist"
 
@@ -139,7 +161,8 @@ def main():
                     else:
                         gesture = "Gesture"
 
-                    #find position for text
+
+                    # Find position for text
                     wrist = lm[0]
 
                     h, w, _ = img.shape
@@ -147,11 +170,13 @@ def main():
                     text_x = int(wrist.x * w)
                     text_y = int(wrist.y * h) - 30
 
-                    #keep text inside screen
+
+                    # Keep text inside screen
                     text_x = max(10, text_x)
                     text_y = max(40, text_y)
 
-                    #display information
+
+                    # Display hand information
                     cv2.putText(
                         img,
                         f"{hand_label} Hand",
@@ -182,13 +207,147 @@ def main():
                         2
                     )
 
-            # Calculate FPS
+
+                # --------------------------------
+                # FIRST HAND DATA
+                # --------------------------------
+
+                lm1 = results.multi_hand_landmarks[0].landmark
+
+                hand1_label = (
+                    results.multi_handedness[0]
+                    .classification[0]
+                    .label
+                )
+
+                hand1_fingers = count_fingers(
+                    lm1,
+                    hand1_label
+                )
+
+                hand1_x = lm1[9].x
+                hand1_y = lm1[9].y
+
+
+                # IMPORTANT:
+                # These addresses stay the same so
+                # your existing TouchDesigner setup
+                # continues to work.
+
+                osc_client.send_message(
+                    "/hand_x",
+                    hand1_x
+                )
+
+                osc_client.send_message(
+                    "/hand_y",
+                    hand1_y
+                )
+
+                osc_client.send_message(
+                    "/fingers",
+                    hand1_fingers
+                )
+
+
+                # --------------------------------
+                # SECOND HAND DATA
+                # --------------------------------
+
+                if len(results.multi_hand_landmarks) > 1:
+
+                    lm2 = results.multi_hand_landmarks[1].landmark
+
+                    hand2_label = (
+                        results.multi_handedness[1]
+                        .classification[0]
+                        .label
+                    )
+
+                    hand2_fingers = count_fingers(
+                        lm2,
+                        hand2_label
+                    )
+
+                    hand2_x = lm2[9].x
+                    hand2_y = lm2[9].y
+
+
+                    # Send second hand data
+                    osc_client.send_message(
+                        "/hand2_x",
+                        hand2_x
+                    )
+
+                    osc_client.send_message(
+                        "/hand2_y",
+                        hand2_y
+                    )
+
+                    osc_client.send_message(
+                        "/hand2_fingers",
+                        hand2_fingers
+                    )
+
+
+                    # --------------------------------
+                    # DISTANCE BETWEEN TWO HANDS
+                    # --------------------------------
+
+                    dx = hand1_x - hand2_x
+                    dy = hand1_y - hand2_y
+
+                    hands_distance = math.sqrt(
+                        dx**2 + dy**2
+                    )
+
+                    osc_client.send_message(
+                        "/hands_distance",
+                        hands_distance
+                    )
+
+
+                else:
+
+                    # --------------------------------
+                    # NO SECOND HAND DETECTED
+                    # --------------------------------
+
+                    osc_client.send_message(
+                        "/hand2_x",
+                        0
+                    )
+
+                    osc_client.send_message(
+                        "/hand2_y",
+                        0
+                    )
+
+                    osc_client.send_message(
+                        "/hand2_fingers",
+                        0
+                    )
+
+                    osc_client.send_message(
+                        "/hands_distance",
+                        0
+                    )
+
+
+            # --------------------------------
+            # CALCULATE FPS
+            # --------------------------------
+
             current_time = time.time()
 
-            fps = 1 / (current_time - previous_time) \
-                if previous_time != 0 else 0
+            fps = (
+                1 / (current_time - previous_time)
+                if previous_time != 0
+                else 0
+            )
 
             previous_time = current_time
+
 
             cv2.putText(
                 img,
@@ -200,18 +359,25 @@ def main():
                 2
             )
 
-            # Display webcam
-            cv2.imshow("Hand Tracking", img)
 
-            #press Q to exit
+            # Display webcam
+            cv2.imshow(
+                "Hand Tracking",
+                img
+            )
+
+
+            # Press Q to exit
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
 
-    #release camera
+    # Release camera
     cap.release()
+
     cv2.destroyAllWindows()
 
-#run program
+
+# Run program
 if __name__ == "__main__":
     main()
